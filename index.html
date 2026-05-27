@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoreo Vial - Smart Road</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet CSS personalizado -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Pantalla de carga y permisos -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loading-content">
+            <i class="fas fa-road fa-3x"></i>
+            <h1>Smart Road Monitor</h1>
+            <p>Solicitando acceso a ubicación GPS...</p>
+            <div class="spinner"></div>
+            <button id="enableGPS" class="btn-gps" style="display:none;">
+                <i class="fas fa-location-arrow"></i> Activar GPS
+            </button>
+        </div>
+    </div>
+
+    <!-- Contenedor principal -->
+    <div id="mainContainer" class="main-container" style="display:none;">
+        <!-- Barra superior -->
+        <div class="top-bar">
+            <div class="logo">
+                <i class="fas fa-road"></i>
+                <span>SmartRoad</span>
+            </div>
+            <div class="status-indicators">
+                <div class="status-badge" id="connectionStatus">
+                    <span class="dot"></span>
+                    <span>Conectando...</span>
+                </div>
+                <div class="status-badge" id="gpsStatus">
+                    <i class="fas fa-satellite"></i>
+                    <span>GPS: --</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mapa -->
+        <div id="map"></div>
+
+        <!-- Panel lateral de información -->
+        <div class="side-panel" id="sidePanel">
+            <div class="panel-header">
+                <h2><i class="fas fa-info-circle"></i> Información de Ruta</h2>
+                <button id="togglePanel" class="btn-icon">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+            
+            <div class="panel-content">
+                <!-- Velocidad actual -->
+                <div class="info-card speed-card">
+                    <div class="speed-display">
+                        <span id="currentSpeed">0</span>
+                        <span class="speed-unit">km/h</span>
+                    </div>
+                    <div class="speed-recommendation" id="speedRecommendation">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Velocidad recomendada: -- km/h</span>
+                    </div>
+                </div>
+
+                <!-- Estado de la carretera -->
+                <div class="info-card road-condition">
+                    <h3><i class="fas fa-road"></i> Estado de la Vía</h3>
+                    <div id="roadCondition" class="condition-display">
+                        <div class="condition-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="condition-text">Normal</div>
+                    </div>
+                </div>
+
+                <!-- Alertas -->
+                <div class="info-card alerts">
+                    <h3><i class="fas fa-exclamation-triangle"></i> Alertas Recientes</h3>
+                    <div id="alertsList" class="alerts-list">
+                        <p class="no-alerts">No hay alertas cercanas</p>
+                    </div>
+                </div>
+
+                <!-- Datos ambientales -->
+                <div class="info-card environment">
+                    <h3><i class="fas fa-thermometer-half"></i> Ambiente</h3>
+                    <div class="env-data">
+                        <div class="env-item">
+                            <i class="fas fa-temperature-high"></i>
+                            <span id="temperature">--°C</span>
+                        </div>
+                        <div class="env-item">
+                            <i class="fas fa-compress-arrows-alt"></i>
+                            <span id="pressure">-- hPa</span>
+                        </div>
+                        <div class="env-item">
+                            <i class="fas fa-mountain"></i>
+                            <span id="altitude">-- m</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Leyenda -->
+        <div class="legend">
+            <h4>Leyenda</h4>
+            <div class="legend-item">
+                <span class="legend-color" style="background: #4CAF50;"></span>
+                <span>Carretera en buen estado</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background: #FFC107;"></span>
+                <span>Precaución (vibraciones)</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background: #FF5722;"></span>
+                <span>Bache/Frenazo detectado</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Script principal -->
+    <script src="script.js"></script>
+</body>
+</html>
