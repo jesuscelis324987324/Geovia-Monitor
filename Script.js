@@ -22,8 +22,8 @@ let roadMarkers = [];
 let userLocation = null;
 let watchID = null;
 let dataUpdateInterval;
-let lastAlertTime = {};
-const ALERT_COOLDOWN = 5000; // 5 segundos entre alertas del mismo tipo
+let alertsList = [];
+const MAX_ALERTS = 10;
 
 // ==================== INICIALIZACIÓN ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -31,9 +31,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainContainer = document.getElementById('mainContainer');
     const enableGPSBtn = document.getElementById('enableGPS');
     
+    // Verificar si el navegador soporta geolocalización
     if ("geolocation" in navigator) {
+        // Intentar obtener la ubicación actual
         navigator.geolocation.getCurrentPosition(
             (position) => {
+                // Usuario aceptó compartir ubicación
                 userLocation = {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude
@@ -43,11 +46,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 mainContainer.style.display = 'flex';
             },
             (error) => {
+                // Usuario denegó o hubo error
                 console.error("Error de geolocalización:", error);
                 enableGPSBtn.style.display = 'block';
                 document.querySelector('.spinner').style.display = 'none';
                 
                 enableGPSBtn.addEventListener('click', () => {
+                    // Intentar de nuevo
                     navigator.geolocation.getCurrentPosition(
                         (position) => {
                             userLocation = {
@@ -59,14 +64,24 @@ document.addEventListener('DOMContentLoaded', () => {
                             mainContainer.style.display = 'flex';
                         },
                         (err) => {
-                            alert('Es necesario activar el GPS para usar esta aplicación.');
+                            alert('Es necesario activar el GPS para usar esta aplicación. Por favor, permite el acceso a la ubicación en la configuración de tu navegador.');
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
                         }
                     );
                 });
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
             }
         );
     } else {
-        alert("Tu navegador no soporta geolocalización.");
+        alert("Tu navegador no soporta geolocalización. Por favor, usa un navegador moderno como Chrome, Firefox o Safari.");
     }
     
     // Toggle panel lateral
@@ -74,52 +89,61 @@ document.addEventListener('DOMContentLoaded', () => {
         const panel = document.getElementById('sidePanel');
         const icon = document.querySelector('#togglePanel i');
         panel.classList.toggle('collapsed');
-        icon.className = panel.classList.contains('collapsed') ? 
-            'fas fa-chevron-left' : 'fas fa-chevron-right';
+        
+        if (panel.classList.contains('collapsed')) {
+            icon.className = 'fas fa-chevron-left';
+        } else {
+            icon.className = 'fas fa-chevron-right';
+        }
     });
 });
 
 // ==================== INICIALIZAR MAPA ====================
 function initializeApp() {
-    const mapContainer = document.getElementById('map');
-    mapContainer.style.width = '100%';
-    mapContainer.style.height = '100%';
+    // Crear mapa centrado en la ubicación del usuario
+    map = L.map('map').setView([userLocation.lat, userLocation.lng], 16);
     
-    map = L.map('map', {
-        center: [userLocation.lat, userLocation.lng],
-        zoom: 16,
-        zoomControl: true,
-        trackResize: true
-    });
-    
+    // Capa del mapa (OpenStreetMap)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19
     }).addTo(map);
     
-    // Ícono del usuario
+    // Ícono personalizado para el usuario
     const userIcon = L.divIcon({
         html: '<div style="background-color: #4A90E2; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(74,144,226,0.8);"></div>',
         iconSize: [20, 20],
         className: 'user-marker'
     });
     
+    // Marcador del usuario
     userMarker = L.marker([userLocation.lat, userLocation.lng], { icon: userIcon })
         .addTo(map)
         .bindPopup('📍 <b>Tu ubicación actual</b>')
         .openPopup();
     
-    // Forzar redibujado
-    setTimeout(() => map.invalidateSize(), 500);
-    window.addEventListener('resize', () => map.invalidateSize());
+    // Crear un círculo de precisión
+    L.circle([userLocation.lat, userLocation.lng], {
+        radius: 20,
+        color: '#4A90E2',
+        fillColor: '#4A90E2',
+        fillOpacity: 0.2
+    }).addTo(map);
     
-    // Iniciar todo
+    // Iniciar seguimiento GPS del usuario
     startLocationTracking();
+    
+    // Escuchar datos en tiempo real de Firebase
     listenToFirebaseData();
+    
+    // Actualizar datos periódicamente (cada 2 segundos)
     dataUpdateInterval = setInterval(updatePeriodicData, 2000);
+    
+    // Actualizar estado de conexión
     updateConnectionStatus(true);
     
-    console.log('✅ Mapa inicializado');
+    console.log('🚀 Aplicación inicializada correctamente');
+    console.log('📍 Ubicación:', userLocation);
 }
 
 // ==================== SEGUIMIENTO GPS DEL USUARIO ====================
@@ -131,121 +155,128 @@ function startLocationTracking() {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude
                 };
+                
+                // Actualizar marcador del usuario
                 userMarker.setLatLng([userLocation.lat, userLocation.lng]);
-                map.panTo([userLocation.lat, userLocation.lng], { animate: true, duration: 0.5 });
+                
+                // Centrar mapa en la ubicación del usuario (suavizado)
+                map.panTo([userLocation.lat, userLocation.lng], {
+                    animate: true,
+                    duration: 0.5
+                });
+                
                 document.getElementById('gpsStatus').innerHTML = 
                     '<i class="fas fa-satellite"></i> GPS: Activo';
             },
             (error) => {
+                console.error("Error en seguimiento GPS:", error);
                 document.getElementById('gpsStatus').innerHTML = 
                     '<i class="fas fa-satellite"></i> GPS: Error';
             },
-            { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+            {
+                enableHighAccuracy: true,
+                maximumAge: 1000,
+                timeout: 5000
+            }
         );
     }
 }
 
 // ==================== ESCUCHAR DATOS DE FIREBASE ====================
 function listenToFirebaseData() {
-    // Escuchar ubicación actual del vehículo
+    // Escuchar ubicación actual del vehículo ESP32
     database.ref('ubicacion_actual').on('value', (snapshot) => {
         const data = snapshot.val();
         if (data && data.lat && data.lng) {
             updateVehicleOnMap(data);
-            updateUIFromUbicacion(data);
         }
     });
     
-    // Escuchar datos viales históricos
+    // Escuchar datos viales históricos (últimos 100 registros)
     database.ref('datos_viales').limitToLast(100).on('value', (snapshot) => {
         const data = snapshot.val();
         if (data) {
-            updateRoadMarkers(data);
-            // Obtener el último dato para actualizar UI
-            const keys = Object.keys(data);
-            if (keys.length > 0) {
-                const lastKey = keys[keys.length - 1];
-                const lastData = data[lastKey];
-                updateUIFromViales(lastData);
-            }
+            updateRoadConditions(data);
         }
     });
     
-    // Estado de conexión
+    // Escuchar estado de conexión de Firebase
     database.ref('.info/connected').on('value', (snapshot) => {
         updateConnectionStatus(snapshot.val());
     });
     
-    console.log('👂 Escuchando Firebase...');
+    console.log('👂 Escuchando datos de Firebase...');
 }
 
-// ==================== ACTUALIZAR VEHÍCULO EN MAPA ====================
+// ==================== ACTUALIZAR VEHÍCULO EN EL MAPA ====================
 function updateVehicleOnMap(data) {
-    const estado = data.estado || data.estado_carretera || 'normal';
-    const color = getVehicleColor(estado);
-    
-    const vehicleIcon = L.divIcon({
-        html: `<i class="fas fa-car" style="font-size: 28px; color: ${color}; filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));"></i>`,
-        iconSize: [28, 28],
-        className: 'vehicle-marker'
-    });
-    
     if (!vehicleMarker) {
+        // Ícono para el vehículo ESP32
+        const vehicleIcon = L.divIcon({
+            html: '<i class="fas fa-car" style="font-size: 24px; color: #FF5722; filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));"></i>',
+            iconSize: [24, 24],
+            className: 'vehicle-marker'
+        });
+        
         vehicleMarker = L.marker([data.lat, data.lng], { icon: vehicleIcon })
             .addTo(map)
-            .bindPopup(createVehiclePopup(data));
+            .bindPopup('🚗 <b>Vehículo ESP32</b>');
     } else {
         vehicleMarker.setLatLng([data.lat, data.lng]);
-        vehicleMarker.setIcon(vehicleIcon);
-        vehicleMarker.setPopupContent(createVehiclePopup(data));
+    }
+    
+    // Actualizar velocidad actual
+    if (data.velocidad) {
+        document.getElementById('currentSpeed').textContent = Math.round(data.velocidad);
+    }
+    
+    // Actualizar estado de la carretera
+    if (data.estado) {
+        updateRoadConditionDisplay(data.estado);
+    }
+    
+    // Actualizar popup del vehículo
+    if (vehicleMarker.getPopup()) {
+        vehicleMarker.setPopupContent(`
+            <b>🚗 Vehículo ESP32</b><br>
+            Velocidad: ${Math.round(data.velocidad || 0)} km/h<br>
+            Estado: ${data.estado || 'Normal'}
+        `);
     }
 }
 
-function createVehiclePopup(data) {
-    const estado = data.estado || 'normal';
-    const velocidad = data.velocidad ? Math.round(data.velocidad) : 0;
-    const segundos = data.segundos_restantes || 0;
-    
-    let estadoTexto = formatEstado(estado);
-    let infoExtra = '';
-    
-    if (estado !== 'normal' && segundos > 0) {
-        infoExtra = `<br>⏱️ Vuelve a normal en: ${segundos}s`;
-    }
-    
-    return `
-        <b>🚗 Vehículo ESP32</b><br>
-        Velocidad: ${velocidad} km/h<br>
-        Estado: ${estadoTexto}${infoExtra}
-    `;
-}
-
-// ==================== ACTUALIZAR MARCADORES DE CARRETERA ====================
-function updateRoadMarkers(data) {
-    // Limpiar marcadores antiguos
+// ==================== ACTUALIZAR CONDICIONES DEL CAMINO ====================
+function updateRoadConditions(data) {
+    // Limpiar marcadores antiguos de la carretera
     roadMarkers.forEach(marker => map.removeLayer(marker));
     roadMarkers = [];
     
+    // Procesar cada lectura
     Object.values(data).forEach(reading => {
-        if (reading.latitud && reading.longitud && reading.estado_carretera && reading.estado_carretera !== 'normal') {
-            const marker = createRoadMarker(reading);
-            if (marker) {
-                marker.addTo(map);
+        if (reading.latitud && reading.longitud) {
+            // Solo mostrar marcadores de advertencia
+            if (reading.estado_carretera && reading.estado_carretera !== 'normal') {
+                const marker = createRoadMarker(reading);
                 roadMarkers.push(marker);
+            }
+            
+            // Si es el dato más reciente, actualizar UI
+            if (reading.timestamp) {
+                updateUI(reading);
             }
         }
     });
     
-    console.log(`🛣️ ${roadMarkers.length} alertas en el mapa`);
+    console.log(`🛣️ ${roadMarkers.length} alertas viales en el mapa`);
 }
 
 function createRoadMarker(reading) {
-    const color = getMarkerColor(reading.estado_carretera);
-    const icon = getMarkerIcon(reading.estado_carretera);
+    const markerColor = getMarkerColor(reading.estado_carretera);
+    const markerIcon = getMarkerIcon(reading.estado_carretera);
     
     const customIcon = L.divIcon({
         html: `<div style="
-            background: ${color};
+            background: ${markerColor};
             width: 30px;
             height: 30px;
             border-radius: 50%;
@@ -254,172 +285,134 @@ function createRoadMarker(reading) {
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
-        ">${icon}</div>`,
+            font-size: 16px;
+        ">${markerIcon}</div>`,
         iconSize: [30, 30],
         className: 'road-marker'
     });
     
+    const marker = L.marker([reading.latitud, reading.longitud], { icon: customIcon })
+        .addTo(map)
+        .bindPopup(createPopupContent(reading));
+    
+    return marker;
+}
+
+function createPopupContent(reading) {
+    const tiempo = reading.timestamp ? new Date(parseInt(reading.timestamp)).toLocaleTimeString() : 'Desconocido';
     const velocidadRec = reading.velocidad_recomendada ? Math.round(reading.velocidad_recomendada) : 'N/A';
     
-    return L.marker([reading.latitud, reading.longitud], { icon: customIcon })
-        .bindPopup(`
+    return `
+        <div style="min-width: 200px;">
             <b>⚠️ Alerta Vial</b><br>
             <hr>
             <b>Estado:</b> ${formatEstado(reading.estado_carretera)}<br>
             <b>Velocidad recomendada:</b> ${velocidadRec} km/h<br>
             <b>Velocidad registrada:</b> ${Math.round(reading.velocidad || 0)} km/h<br>
-            <small>${new Date().toLocaleTimeString()}</small>
-        `);
+            <b>Aceleración Z:</b> ${reading.accelZ ? reading.accelZ.toFixed(2) : 'N/A'} g<br>
+            <b>Detectado:</b> ${tiempo}<br>
+            <small>Lat: ${reading.latitud.toFixed(6)}, Lng: ${reading.longitud.toFixed(6)}</small>
+        </div>
+    `;
 }
 
-// ==================== ACTUALIZAR UI PRINCIPAL ====================
-function updateUIFromUbicacion(data) {
-    // Actualizar velocidad
-    if (data.velocidad !== undefined) {
-        document.getElementById('currentSpeed').textContent = Math.round(data.velocidad);
+// ==================== ACTUALIZAR INTERFAZ DE USUARIO ====================
+function updateUI(data) {
+    // Estado de la carretera
+    if (data.estado_carretera) {
+        updateRoadConditionDisplay(data.estado_carretera);
     }
     
-    // Actualizar estado de carretera
-    const estado = data.estado || 'normal';
-    const segundos = data.segundos_restantes || 0;
-    updateRoadConditionDisplay(estado, segundos);
-    
-    // Actualizar recomendación de velocidad
-    updateSpeedRecommendation(estado, data.velocidad);
-    
-    // Agregar alerta si es necesario
-    if (estado !== 'normal') {
-        addAlertIfNew(estado, data.velocidad, segundos);
-    }
-}
-
-function updateUIFromViales(data) {
-    if (!data) return;
-    
-    // Actualizar datos ambientales
-    if (data.temperatura !== undefined) {
-        document.getElementById('temperature').textContent = `${data.temperatura.toFixed(1)}°C`;
-    }
-    if (data.presion !== undefined) {
-        document.getElementById('pressure').textContent = `${data.presion.toFixed(1)} hPa`;
-    }
-    const altitud = data.altitud_barometrica || data.altitud_gps;
-    if (altitud !== undefined) {
-        document.getElementById('altitude').textContent = `${altitud.toFixed(0)} m`;
-    }
-    
-    // Actualizar estado
-    const estado = data.estado_carretera || 'normal';
-    const segundos = data.segundos_restantes_peligro || 0;
-    updateRoadConditionDisplay(estado, segundos);
-    
-    // Actualizar velocidad recomendada
-    if (data.velocidad_recomendada !== undefined) {
+    // Velocidad recomendada
+    if (data.velocidad_recomendada) {
         document.getElementById('speedRecommendation').innerHTML = 
             `<i class="fas fa-shield-alt"></i> Velocidad recomendada: ${Math.round(data.velocidad_recomendada)} km/h`;
     }
+    
+    // Datos ambientales
+    if (data.temperatura) {
+        document.getElementById('temperature').textContent = `${data.temperatura.toFixed(1)}°C`;
+    }
+    if (data.presion) {
+        document.getElementById('pressure').textContent = `${data.presion.toFixed(1)} hPa`;
+    }
+    if (data.altitud_barometrica || data.altitud_gps) {
+        const altitud = data.altitud_barometrica || data.altitud_gps;
+        document.getElementById('altitude').textContent = `${altitud.toFixed(0)} m`;
+    }
+    
+    // Agregar alerta si es necesario
+    if (data.estado_carretera && data.estado_carretera !== 'normal') {
+        addAlert(data);
+    }
 }
 
-function updateRoadConditionDisplay(estado, segundosRestantes = 0) {
+function updateRoadConditionDisplay(estado) {
     const conditionDiv = document.getElementById('roadCondition');
+    conditionDiv.className = `condition-display ${estado}`;
+    
     const conditionText = document.querySelector('.condition-text');
     const conditionIcon = document.querySelector('.condition-icon i');
     
-    // Resetear clases
-    conditionDiv.className = 'condition-display';
-    
-    let textoEstado = '';
-    let iconoClase = '';
-    
     switch(estado) {
         case 'normal':
-            conditionDiv.classList.add('normal');
-            textoEstado = 'Normal';
-            iconoClase = 'fas fa-check-circle';
+            conditionText.textContent = 'Normal';
+            conditionIcon.className = 'fas fa-check-circle';
             break;
         case 'mal_estado':
-            conditionDiv.classList.add('mal_estado');
-            textoEstado = segundosRestantes > 0 ? 
-                `Precaución - Vibraciones (${segundosRestantes}s)` : 'Precaución - Vibraciones';
-            iconoClase = 'fas fa-exclamation-circle';
+            conditionText.textContent = 'Precaución';
+            conditionIcon.className = 'fas fa-exclamation-circle';
             break;
         case 'bache':
-            conditionDiv.classList.add('bache');
-            textoEstado = segundosRestantes > 0 ? 
-                `¡BACHE! - Peligro (${segundosRestantes}s)` : '¡BACHE! - Peligro';
-            iconoClase = 'fas fa-exclamation-triangle';
+            conditionText.textContent = '¡Bache!';
+            conditionIcon.className = 'fas fa-exclamation-triangle';
             break;
         case 'peligro_frenado':
-            conditionDiv.classList.add('peligro_frenado');
-            textoEstado = segundosRestantes > 0 ? 
-                `Frenado Brusco (${segundosRestantes}s)` : 'Frenado Brusco';
-            iconoClase = 'fas fa-hand-paper';
-            break;
-        case 'giro_brusco':
-            conditionDiv.classList.add('peligro_frenado');
-            textoEstado = segundosRestantes > 0 ? 
-                `Giro Brusco (${segundosRestantes}s)` : 'Giro Brusco';
-            iconoClase = 'fas fa-undo';
+            conditionText.textContent = 'Frenado Brusco';
+            conditionIcon.className = 'fas fa-hand-paper';
             break;
         default:
-            conditionDiv.classList.add('normal');
-            textoEstado = 'Normal';
-            iconoClase = 'fas fa-check-circle';
-    }
-    
-    conditionText.textContent = textoEstado;
-    conditionIcon.className = iconoClase;
-}
-
-function updateSpeedRecommendation(estado, velocidad) {
-    const speedDiv = document.getElementById('speedRecommendation');
-    
-    switch(estado) {
-        case 'bache':
-            speedDiv.innerHTML = `<i class="fas fa-shield-alt"></i> ⚠️ ¡Reduzca velocidad! Máx: ${Math.round(velocidad * 0.4)} km/h`;
-            break;
-        case 'peligro_frenado':
-            speedDiv.innerHTML = `<i class="fas fa-shield-alt"></i> ⚠️ ¡Frenado brusco! Máx: ${Math.round(velocidad * 0.5)} km/h`;
-            break;
-        case 'mal_estado':
-            speedDiv.innerHTML = `<i class="fas fa-shield-alt"></i> Precaución: ${Math.round(velocidad * 0.7)} km/h`;
-            break;
-        default:
-            speedDiv.innerHTML = `<i class="fas fa-shield-alt"></i> Velocidad normal: hasta 120 km/h`;
+            conditionText.textContent = 'Desconocido';
+            conditionIcon.className = 'fas fa-question-circle';
     }
 }
 
 // ==================== SISTEMA DE ALERTAS ====================
-function addAlertIfNew(estado, velocidad, segundos) {
-    // Evitar alertas duplicadas en poco tiempo
-    const now = Date.now();
-    if (lastAlertTime[estado] && (now - lastAlertTime[estado] < ALERT_COOLDOWN)) {
-        return; // Ya se mostró una alerta similar recientemente
-    }
-    lastAlertTime[estado] = now;
-    
+function addAlert(data) {
     const alertsList = document.getElementById('alertsList');
     const noAlerts = document.querySelector('.no-alerts');
     if (noAlerts) noAlerts.remove();
     
-    const config = getAlertConfig(estado);
+    // Evitar alertas duplicadas en poco tiempo
+    const lastAlert = alertsList[alertsList.length - 1];
+    if (lastAlert && lastAlert.estado === data.estado_carretera) {
+        const timeDiff = Date.now() - lastAlert.timestamp;
+        if (timeDiff < 5000) return; // No mostrar la misma alerta en 5 segundos
+    }
+    
+    const alertConfig = getAlertConfig(data.estado_carretera);
     
     const alertDiv = document.createElement('div');
-    alertDiv.className = `alert-item ${estado}`;
+    alertDiv.className = `alert-item ${data.estado_carretera}`;
     alertDiv.innerHTML = `
-        <span class="alert-icon">${config.icon}</span>
+        <span class="alert-icon">${alertConfig.icon}</span>
         <div class="alert-content">
-            <strong>${config.title}</strong>
-            <p>${config.message} ${segundos > 0 ? `(Normal en ${segundos}s)` : ''}</p>
-            <small>Velocidad: ${Math.round(velocidad || 0)} km/h | ${new Date().toLocaleTimeString()}</small>
+            <strong>${alertConfig.title}</strong>
+            <p>${alertConfig.message}</p>
+            <small>${new Date().toLocaleTimeString()}</small>
         </div>
     `;
     
     alertsList.insertBefore(alertDiv, alertsList.firstChild);
     
-    // Limitar a 10 alertas
-    while (alertsList.children.length > 10) {
+    // Almacenar en array
+    alertsList.push({
+        estado: data.estado_carretera,
+        timestamp: Date.now()
+    });
+    
+    // Limitar número de alertas
+    if (alertsList.children.length > MAX_ALERTS) {
         alertsList.removeChild(alertsList.lastChild);
     }
 }
@@ -428,30 +421,25 @@ function getAlertConfig(estado) {
     const configs = {
         'bache': {
             icon: '🕳️',
-            title: '¡BACHE DETECTADO!',
-            message: 'Reduzca la velocidad inmediatamente. Peligro de daños.'
+            title: 'Bache Detectado',
+            message: 'Reduzca la velocidad inmediatamente'
+        },
+        'mal_estado': {
+            icon: '🛤️',
+            title: 'Carretera en Mal Estado',
+            message: 'Conduzca con precaución'
         },
         'peligro_frenado': {
             icon: '🛑',
-            title: '¡FRENADO BRUSCO!',
-            message: 'Zona de frenado repentino. Mantenga distancia.'
-        },
-        'mal_estado': {
-            icon: '📳',
-            title: 'Vibraciones Anormales',
-            message: 'Carretera en mal estado. Conduzca con precaución.'
-        },
-        'giro_brusco': {
-            icon: '↩️',
-            title: 'Giro Brusco',
-            message: 'Curva peligrosa detectada. Reduzca velocidad.'
+            title: 'Zona de Frenado Brusco',
+            message: 'Mantenga distancia de seguridad'
         }
     };
     
     return configs[estado] || {
         icon: '⚠️',
         title: 'Alerta Vial',
-        message: 'Condición irregular detectada.'
+        message: 'Condición irregular detectada'
     };
 }
 
@@ -466,43 +454,28 @@ function updateConnectionStatus(connected) {
 }
 
 function updatePeriodicData() {
-    // Actualizar desde ubicacion_actual
-    database.ref('ubicacion_actual').once('value', (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            updateUIFromUbicacion(data);
-        }
-    });
+    if (!userLocation) return;
     
-    // Actualizar desde último dato vial
+    // Obtener el dato más reciente de Firebase
     database.ref('datos_viales').limitToLast(1).once('value', (snapshot) => {
         const data = snapshot.val();
         if (data) {
-            const lastData = Object.values(data)[0];
-            updateUIFromViales(lastData);
+            const lastReading = Object.values(data)[0];
+            if (lastReading) {
+                updateUI(lastReading);
+            }
         }
     });
-}
-
-function getVehicleColor(estado) {
-    const colors = {
-        'normal': '#4CAF50',        // Verde
-        'mal_estado': '#FFC107',    // Amarillo
-        'bache': '#f44336',         // Rojo
-        'peligro_frenado': '#FF5722', // Naranja oscuro
-        'giro_brusco': '#9C27B0'    // Púrpura
-    };
-    return colors[estado] || '#4CAF50';
 }
 
 function getMarkerColor(estado) {
     const colors = {
-        'bache': '#f44336',
-        'peligro_frenado': '#FF5722',
-        'mal_estado': '#FFC107',
-        'giro_brusco': '#9C27B0'
+        'bache': '#f44336',           // Rojo
+        'peligro_frenado': '#FF5722', // Naranja oscuro
+        'mal_estado': '#FFC107',      // Amarillo
+        'normal': '#4CAF50'           // Verde
     };
-    return colors[estado] || '#9E9E9E';
+    return colors[estado] || '#9E9E9E'; // Gris por defecto
 }
 
 function getMarkerIcon(estado) {
@@ -510,7 +483,7 @@ function getMarkerIcon(estado) {
         'bache': '🕳️',
         'peligro_frenado': '🛑',
         'mal_estado': '⚠️',
-        'giro_brusco': '↩️'
+        'normal': '✓'
     };
     return icons[estado] || '•';
 }
@@ -520,20 +493,42 @@ function formatEstado(estado) {
         'normal': '✅ Normal',
         'mal_estado': '⚠️ Mal Estado',
         'bache': '🕳️ Bache',
-        'peligro_frenado': '🛑 Frenado Brusco',
-        'giro_brusco': '↩️ Giro Brusco'
+        'peligro_frenado': '🛑 Frenado Brusco'
     };
     return formatos[estado] || estado;
 }
 
-// ==================== LIMPIEZA ====================
+// ==================== LIMPIEZA Y DESCONEXIÓN ====================
 window.addEventListener('beforeunload', () => {
-    if (watchID) navigator.geolocation.clearWatch(watchID);
-    if (dataUpdateInterval) clearInterval(dataUpdateInterval);
+    // Limpiar watchers
+    if (watchID) {
+        navigator.geolocation.clearWatch(watchID);
+    }
+    
+    // Limpiar intervalo
+    if (dataUpdateInterval) {
+        clearInterval(dataUpdateInterval);
+    }
+    
+    // Desconectar listeners de Firebase
     database.ref('ubicacion_actual').off();
     database.ref('datos_viales').off();
     database.ref('.info/connected').off();
-    console.log('👋 Recursos liberados');
+    
+    console.log('👋 Aplicación cerrada, recursos liberados');
 });
+
+// ==================== MANEJO DE ERRORES ====================
+window.addEventListener('error', (event) => {
+    console.error('Error en la aplicación:', event.error);
+});
+
+// Si el mapa no carga después de 10 segundos, mostrar error
+setTimeout(() => {
+    if (!map) {
+        console.error('Error: El mapa no se pudo cargar');
+        alert('Hubo un problema al cargar el mapa. Por favor, recarga la página.');
+    }
+}, 10000);
 
 console.log('📄 Script cargado y listo');
